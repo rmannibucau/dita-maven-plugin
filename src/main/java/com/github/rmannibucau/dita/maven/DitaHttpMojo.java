@@ -1,6 +1,7 @@
 package com.github.rmannibucau.dita.maven;
 
 import java.io.File;
+import java.util.HashMap;
 import java.util.Scanner;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -22,6 +23,15 @@ public class DitaHttpMojo extends DitaRenderMojo {
     public void execute() {
         outputDir.mkdirs(); // ensure it exists before starting the server
 
+        // fix css
+        if (properties == null) {
+            properties = new HashMap<>();
+        }
+        if (!properties.containsKey("user.csspath")) {
+            properties.put("user.csspath", "http://localhost:" + port + "/");
+        }
+
+        // start rendering thread
         final AtomicBoolean running = new AtomicBoolean(true);
         final Semaphore renderSemaphore = new Semaphore(1);
         final Thread renderingThread = new Thread(() -> {
@@ -44,6 +54,7 @@ public class DitaHttpMojo extends DitaRenderMojo {
         renderingThread.setName("dita-rendering-thread");
         renderingThread.start();
 
+        // start http server
         final Meecrowave.Builder builder = new Meecrowave.Builder();
         builder.setUseLog4j2JulLogManager(false);
         builder.setLoggingGlobalSetup(false);

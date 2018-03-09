@@ -1,8 +1,8 @@
 package com.github.rmannibucau.dita.maven;
 
 import static java.util.Collections.emptyList;
-import static java.util.Collections.emptyMap;
-import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.stream.Collectors.joining;
+import static java.util.stream.Collectors.toSet;
 import static org.apache.maven.plugins.annotations.LifecyclePhase.PROCESS_SOURCES;
 
 import java.io.BufferedInputStream;
@@ -17,6 +17,7 @@ import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
@@ -24,6 +25,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -48,8 +50,8 @@ public class DitaRenderMojo extends AbstractMojo {
     @Parameter(property = "dita.ditaDir", defaultValue = "${project.basedir}/src/main/dita")
     private File ditaDir;
 
-    @Parameter(property = "dita.extensions", defaultValue = "ditamap")
-    private Collection<String> extensions;
+    @Parameter(property = "dita.patterns", defaultValue = "dm\\-.*ditamap")
+    private Collection<String> patterns;
 
     @Parameter(property = "dita.includes")
     private Collection<String> includes;
@@ -73,7 +75,7 @@ public class DitaRenderMojo extends AbstractMojo {
     private int parallelism;
 
     @Parameter(property = "dita.properties")
-    private Map<String, String> properties;
+    protected Map<String, String> properties;
 
     @Parameter(property = "dita.mode", defaultValue = "STRICT")
     private String mode;
@@ -107,53 +109,66 @@ public class DitaRenderMojo extends AbstractMojo {
         doExecute(distribution);
     }
 
-    private void doExecute(final File distribution) {
+    private void doExecute(final File distribution) throws MojoFailureException {
+        final Collection<Throwable> errors = new ArrayList<>();
         try (final URLClassLoader loader = new URLClassLoader(findClassLoaderUrls(distribution),
                 Thread.currentThread().getContextClassLoader())) {
 
             final ProcessorCache processors = new ProcessorCache(loader, distribution, ditaTempDir, transtype, cleanOnFailure,
-                    createDebugLog, mode, properties == null ? emptyMap() : properties, getLog());
+                    createDebugLog, mode, properties, getLog());
+
+            final Path srcPath = ditaDir.toPath();
+            final Collection<Pattern> patterns = (this.patterns == null ? Stream.<Pattern> empty()
+                    : this.patterns.stream().map(Pattern::compile)).collect(toSet());
+
             final Executor executor = parallelism == 0 ? Runnable::run
                     : Executors.newFixedThreadPool(parallelism < 0 ? Runtime.getRuntime().availableProcessors() : parallelism);
-            final Path srcPath = ditaDir.toPath();
             final Semaphore semaphore = new Semaphore(0);
-            int count = 0;
+            long count = 0;
             try {
-                count = Stream.of(Objects.requireNonNull(ditaDir.listFiles()))
-                        .filter(f -> (includes != null && includes.contains(f.getName())) || (includes == null
-                                || (extensions == null || extensions.stream().anyMatch(e -> f.getName().endsWith('.' + e)))))
-                        .parallel().mapToInt(file -> {
-                            executor.execute(() -> processors.withProcessor(processor -> {
-                                final File output = new File(outputDir,
-                                        srcPath.relativize(file.getParentFile().toPath()).toString());
-                                getLog().info("Processing " + file.getAbsolutePath());
+                count = Stream.of(Objects.requireNonNull(ditaDir.listFiles(), "no dita children for " + ditaDir))
+                              .filter(f -> (includes != null && includes.contains(f.getName()))
+                                || (includes == null || (includes == null && patterns.isEmpty()
+                                        || patterns.stream().anyMatch(e -> e.matcher(f.getName()).matches()))))
+                              .peek(file -> executor.execute(() -> processors.withProcessor(processor -> {
+                                  try {
+                                      final File output = new File(outputDir,
+                                              srcPath.relativize(file.getParentFile().toPath()).toString());
+                                      getLog().info("Processing " + file.getAbsolutePath());
 
-                                final Class<?> pc = processor.getClass();
-                                try {
-                                    pc.getMethod("setInput", File.class).invoke(processor, file.getAbsoluteFile());
-                                    pc.getMethod("setOutputDir", File.class).invoke(processor, output);
-                                    pc.getMethod("run").invoke(processor);
-                                } catch (final NoSuchMethodException | IllegalAccessException e) {
-                                    throw new IllegalStateException(e);
-                                } catch (final InvocationTargetException e) {
-                                    throw new IllegalStateException(e.getTargetException());
-                                } finally {
-                                    semaphore.release();
-                                }
-                            }));
-                            return 1;
-                        }).sum();
+                                      final Class<?> pc = processor.getClass();
+
+                                      pc.getMethod("setInput", File.class).invoke(processor, file.getAbsoluteFile());
+                                      pc.getMethod("setOutputDir", File.class).invoke(processor, output);
+                                      pc.getMethod("run").invoke(processor);
+                                  } catch (final NoSuchMethodException | IllegalAccessException e) {
+                                      throw new IllegalStateException(e);
+                                  } catch (final InvocationTargetException e) {
+                                      errors.add(e.getTargetException());
+                                      throw new IllegalStateException(e.getTargetException());
+                                  } finally {
+                                      getLog().info("Finished processing: " + file);
+                                      semaphore.release();
+                                  }
+                              }))).count();
             } finally {
                 if (ExecutorService.class.isInstance(executor)) {
                     final ExecutorService es = ExecutorService.class.cast(executor);
                     es.shutdown();
                     try {
-                        semaphore.acquire(count);
-                        es.awaitTermination(1, MINUTES);
+                        semaphore.acquire((int) count);
                     } catch (final InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
                 }
+            }
+            getLog().info("Rendered " + count + " files");
+            if (!errors.isEmpty()) {
+                final MojoFailureException exception = new MojoFailureException("Some errors occured:\n"
+                        + errors.stream().map(e -> e.getMessage() == null ? e.getCause().getMessage() : e.getMessage())
+                                .collect(joining("\n  -", "  -", "")));
+                errors.forEach(exception::addSuppressed);
+                throw exception;
             }
         } catch (final IOException e) {
             throw new IllegalStateException(e);
