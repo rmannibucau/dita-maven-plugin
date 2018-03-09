@@ -1,0 +1,50 @@
+= Dita Maven Plugin
+
+This plugin downloads a dita distribution under the hood and executes
+some processors (see Dita-OT) on your project.
+
+Sources are assumed being in `src/main/dita` and by default it includes
+all `ditamap` files. This is indeed configurable.
+
+== Goals
+
+There are two goal - if we exclude the help - provided by this plugin:
+
+- `dita:render` to render the directory
+- `dita:http` to start a small HTTP server and expose the rendered folder through HTTP. In this mode you can
+enter `reload` (or `r`) + ENTER to force a new rendering roundtrip.
+
+Configuration:
+
+[source,xml]
+----
+<plugin>
+  <groupId>com.github.rmannibucau</groupId>
+  <artifactId>dita-maven-plugin</artifactId>
+  <version>${plugin.version}</version>
+  <executions>
+    <execution>
+      <id>dita-rendering</id>
+      <phase>process-resources</phase>
+      <goals>
+        <goal>render</goal>
+      </goals>
+    </execution>
+  </executions>
+</plugin>
+----
+
+|===
+|Name | Description | Default
+| extensions | list of extensions of files to include in the rendering | `ditamap`
+| includes | list of filenames to include in the rendering. If set, `extensions` is ignored. | -
+| outputDir | where to render files | `${project.build.directory}/dita/output`
+| ditaTempDir | where to render files | `${project.build.directory}/dita/temp`
+| transtype | rendering type | `html5`
+| cleanOnFailure, createDebugLog | `Processor` config of the same name | true, false
+| parallelism | Number of threads to process the files to render, a thread is used by file (map). `-1` means use the machine available cores, 0 means don't use threads (caller), a positive number is the number of threads to use. | `-1`
+| mode | rendering mode (`STRICT`, `LAX`, ...). | `STRICT`
+| ditaVersion | distribution version | `3.0.2`
+| ditaDownloadUrl | where to download the distriution from if not found locally | github releases
+| cacheDistribution | if the distribution is downloaded, should it be cached locally in your m2 repository | `true`
+|===
