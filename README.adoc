@@ -43,7 +43,7 @@ Configuration:
 | transtype | rendering type | `html5`
 | cleanOnFailure, createDebugLog | `Processor` config of the same name | true, false
 | parallelism | Number of threads to process the files to render, a thread is used by file (map). `-1` means use the machine available cores, 0 means don't use threads (caller), a positive number is the number of threads to use. | `-1`
-| mode | rendering mode (`STRICT`, `LAX`, ...). | `STRICT`
+| mode | rendering mode (`STRICT`, `LAX`, `SKIP`). | `STRICT`
 | ditaVersion | distribution version | `3.0.2`
 | ditaDownloadUrl | where to download the distriution from if not found locally | github releases
 | cacheDistribution | if the distribution is downloaded, should it be cached locally in your m2 repository | `true`
