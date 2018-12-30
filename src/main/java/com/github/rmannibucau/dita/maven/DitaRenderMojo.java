@@ -127,9 +127,9 @@ public class DitaRenderMojo extends AbstractMojo {
             long count = 0;
             try {
                 count = Stream.of(Objects.requireNonNull(ditaDir.listFiles(), "no dita children for " + ditaDir))
-                              .filter(f -> (includes != null && includes.contains(f.getName()))
-                                || (includes == null || (includes == null && patterns.isEmpty()
-                                        || patterns.stream().anyMatch(e -> e.matcher(f.getName()).matches()))))
+                              .filter(f ->
+                                (includes != null && includes.contains(f.getName()))
+                                || (includes == null && patterns.isEmpty() || patterns.stream().anyMatch(e -> e.matcher(f.getName()).matches())))
                               .peek(file -> executor.execute(() -> processors.withProcessor(processor -> {
                                   try {
                                       final File output = new File(outputDir,
